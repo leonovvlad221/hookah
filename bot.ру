@@ -1,0 +1,57 @@
+import logging
+import os
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from dotenv import load_dotenv
+
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv('TOKEN')
+
+# Включаем логирование
+logging.basicConfig(level=logging.INFO)
+
+# Инициализация бота и диспетчера
+bot = Bot(token=TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
+
+class Order(StatesGroup):
+    waiting_for_table = State()
+    waiting_for_hookah_count = State()
+
+# Команда /start
+@dp.message_handler(commands='start')
+async def cmd_start(message: types.Message):
+    await message.answer("Привет! Какой у вас номер стола? (1-45)")
+    await Order.waiting_for_table.set()
+
+@dp.message_handler(state=Order.waiting_for_table)
+async def process_table(message: types.Message, state: FSMContext):
+    try:
+        table_number = int(message.text)
+        if table_number < 1 or table_number > 45:
+            raise ValueError
+        await state.update_data(table_number=table_number)
+        await message.answer(f"Отлично, стол {table_number}. Сколько кальянов вы хотите?")
+        await Order.waiting_for_hookah_count.set()
+    except ValueError:
+        await message.answer("Введите корректный номер стола (от 1 до 45).")
+
+@dp.message_handler(state=Order.waiting_for_hookah_count)
+async def process_hookah_count(message: types.Message, state: FSMContext):
+    try:
+        hookah_count = int(message.text)
+        if hookah_count < 1:
+            raise ValueError
+        data = await state.get_data()
+        table_number = data['table_number']
+        await message.answer(f"Ваш заказ:\nСтол №{table_number}\nКальянов: {hookah_count}\n\nСпасибо! Ожидайте кальяны 🍹")
+        await state.finish()
+    except ValueError:
+        await message.answer("Введите корректное количество кальянов (число больше 0).")
+
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
