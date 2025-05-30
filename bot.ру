@@ -1,25 +1,31 @@
-import os
 import logging
-from aiogram import Bot, Dispatcher, types
+import os
+
+from aiohttp import web
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from dotenv import load_dotenv
 
+# Завантаження .env
 load_dotenv()
-
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.getenv("PORT", 10000))
+PORT = int(os.getenv("PORT", 8000))
 
+# Ініціалізація бота і диспетчера
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-TABLES = list(range(1, 46))
+# Список столів
+TABLES = list(range(1, 46))  # 1-45
 
+# Постійні клієнти
 VIP_CLIENTS = [
     "Эдгар Хачатарян", "Эрнест Хачатарян", "Саша Лысенко", "Эмин Бабаев", "Шахин Бабаев",
-    "Тахир", "Артур Арутюнян", "Тарен Егонян", "Игорь Бегучев", "Артур Маркосян",
+    "Тахир", "Артур Арутюнян", "Тарен Егондян", "Игорь Бегучев", "Артур Маркосян",
     "Аргишт", "Игорь Буштаков", "Саша Бондаренко", "Славик Гречуха", "Артем Зинченко",
     "Валик Понамарев", "Жека Абросимов", "Артем Булгурский", "Виталик Герасимов",
     "Сергей Кесян", "Георгий Кондрашев", "Максим Отрахов", "Сергей Бондаренко",
@@ -27,48 +33,48 @@ VIP_CLIENTS = [
     "Габилова Алина", "Андрей Бей"
 ]
 
+# FSM стани
 class Booking(StatesGroup):
-    table = State()
-    hookah_count = State()
+    waiting_for_table = State()
+    waiting_for_hookahs = State()
 
-@dp.message()
-async def start(message: types.Message, state: FSMContext):
-    await message.answer("Привет! Введите номер стола (1-45):")
-    await state.set_state(Booking.table)
+@dp.message(F.text == "/start")
+async def cmd_start(message: Message, state: FSMContext):
+    await message.answer("Привет! Напиши номер стола (1-45):")
+    await state.set_state(Booking.waiting_for_table)
 
-@dp.message(Booking.table)
-async def ask_table(message: types.Message, state: FSMContext):
-    try:
-        table_number = int(message.text)
-        if table_number not in TABLES:
-            raise ValueError
-        await state.update_data(table=table_number)
-        await message.answer("Сколько кальянов нужно?")
-        await state.set_state(Booking.hookah_count)
-    except ValueError:
-        await message.answer("Введите правильный номер стола от 1 до 45.")
+@dp.message(Booking.waiting_for_table)
+async def process_table(message: Message, state: FSMContext):
+    if not message.text.isdigit() or int(message.text) not in TABLES:
+        await message.answer("Неверный номер стола. Введите число от 1 до 45.")
+        return
+    await state.update_data(table=int(message.text))
+    await message.answer("Сколько кальянов вам нужно?")
+    await state.set_state(Booking.waiting_for_hookahs)
 
-@dp.message(Booking.hookah_count)
-async def ask_hookahs(message: types.Message, state: FSMContext):
-    try:
-        hookah_count = int(message.text)
-        data = await state.get_data()
-        table = data['table']
-        await message.answer(f"Ваш заказ принят: Стол №{table}, кальянов: {hookah_count}.")
-        await state.clear()
-    except ValueError:
-        await message.answer("Введите количество кальянов числом.")
+@dp.message(Booking.waiting_for_hookahs)
+async def process_hookahs(message: Message, state: FSMContext):
+    if not message.text.isdigit() or int(message.text) <= 0:
+        await message.answer("Введите корректное количество кальянов.")
+        return
+    data = await state.get_data()
+    table = data["table"]
+    hookahs = int(message.text)
+    await message.answer(f"Ваш заказ: Стол #{table}, {hookahs} кальян(ов). Спасибо!")
+    await state.clear()
 
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-
+# Створення aiohttp додатку
 app = web.Application()
-app.router.add_post("/", dp.webhook_handler())
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
 
+# Підключаємо webhook handler
+SimpleRequestHandler(
+    dispatcher=dp,
+    bot=bot,
+).register(app, path="/")
+
+# Підключаємо диспетчер
+setup_application(app, dp)
+
+# Запуск сервера
 if __name__ == "__main__":
     web.run_app(app, port=PORT)
