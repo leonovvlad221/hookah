@@ -18,9 +18,6 @@ bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# ID адміністратора (заміни на свій ID!)
-ADMIN_ID = 123456789  # <-- Тут встав свій Telegram ID
-
 # Список постійних клієнтів
 regular_customers = [
     "Эдгар Хачатарян",
@@ -55,9 +52,6 @@ regular_customers = [
     "Габилова Алина",
     "Андрей Бей"
 ]
-
-# Пам'ять для замовлень
-orders = []
 
 # Створюємо машину станів
 class OrderState(StatesGroup):
@@ -131,14 +125,6 @@ async def get_hookahs(message: types.Message, state: FSMContext):
     table = data['table']
     hookahs = data['hookahs']
 
-    order_info = {
-        "name": name,
-        "surname": surname,
-        "table": table,
-        "hookahs": hookahs
-    }
-    orders.append(order_info)
-
     await message.answer(
         f"✅ Замовлення прийнято!\n\n"
         f"👤 Ім'я: {name} {surname}\n"
@@ -146,22 +132,6 @@ async def get_hookahs(message: types.Message, state: FSMContext):
         f"💨 Кальяни: {hookahs} шт."
     )
     await state.finish()
-
-# Адмін команда для перегляду замовлень
-@dp.message_handler(commands=['orders'])
-async def show_orders(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ У вас немає доступу до цієї команди.")
-        return
-    if not orders:
-        await message.answer("Поки що немає замовлень.")
-        return
-    result = "📋 *Список замовлень:*\n\n"
-    for idx, order in enumerate(orders, start=1):
-        result += (f"{idx}. 👤 {order['name']} {order['surname']}\n"
-                   f"🪑 Стіл: {order['table']}\n"
-                   f"💨 Кальяни: {order['hookahs']} шт.\n\n")
-    await message.answer(result, parse_mode="Markdown")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
