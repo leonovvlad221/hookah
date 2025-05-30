@@ -6,52 +6,162 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from dotenv import load_dotenv
 
-# Загрузка переменных окружения
+# Завантаження змінних середовища
 load_dotenv()
 TOKEN = os.getenv('TOKEN')
 
-# Включаем логирование
+# Включаємо логування
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
+# Ініціалізація бота і диспетчера
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-class Order(StatesGroup):
+# ID адміністратора (заміни на свій ID!)
+ADMIN_ID = 123456789  # <-- Тут встав свій Telegram ID
+
+# Список постійних клієнтів
+regular_customers = [
+    "Эдгар Хачатарян",
+    "Эрнест Хачатарян",
+    "Саша Лысенко",
+    "Эмин Бабаев",
+    "Шахин Бабаев",
+    "Тахир",
+    "Артур Арутюнян",
+    "Тарен Егонян",
+    "Игорь Бегучев",
+    "Артур Маркосян",
+    "Аргишт",
+    "Игорь Буштаков",
+    "Саша Бондаренко",
+    "Славик Гречуха",
+    "Артем Зинченко",
+    "Валик Понамарев",
+    "Жека Абросимов",
+    "Артем Булгурский",
+    "Виталик Герасимов",
+    "Сергей Кесян",
+    "Георгий Кондрашев",
+    "Максим Отрахов",
+    "Сергей Бондаренко",
+    "Оганезов Рем",
+    "Рамиль",
+    "Юра",
+    "Ден Чай",
+    "Рома Явников",
+    "Захар",
+    "Габилова Алина",
+    "Андрей Бей"
+]
+
+# Пам'ять для замовлень
+orders = []
+
+# Створюємо машину станів
+class OrderState(StatesGroup):
+    waiting_for_regular = State()
+    waiting_for_name = State()
+    waiting_for_surname = State()
     waiting_for_table = State()
-    waiting_for_hookah_count = State()
+    waiting_for_hookahs = State()
 
-# Команда /start
-@dp.message_handler(commands='start')
-async def cmd_start(message: types.Message):
-    await message.answer("Привет! Какой у вас номер стола? (1-45)")
-    await Order.waiting_for_table.set()
+# Старт
+@dp.message_handler(commands=['start'])
+async def start_order(message: types.Message):
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add("Так", "Ні")
+    await message.answer("👋 Привіт! Ви постійний клієнт?", reply_markup=keyboard)
+    await OrderState.waiting_for_regular.set()
 
-@dp.message_handler(state=Order.waiting_for_table)
-async def process_table(message: types.Message, state: FSMContext):
-    try:
-        table_number = int(message.text)
-        if table_number < 1 or table_number > 45:
-            raise ValueError
-        await state.update_data(table_number=table_number)
-        await message.answer(f"Отлично, стол {table_number}. Сколько кальянов вы хотите?")
-        await Order.waiting_for_hookah_count.set()
-    except ValueError:
-        await message.answer("Введите корректный номер стола (от 1 до 45).")
+@dp.message_handler(state=OrderState.waiting_for_regular)
+async def choose_regular(message: types.Message, state: FSMContext):
+    if message.text.lower() == "так":
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        for name in regular_customers:
+            keyboard.add(name)
+        await message.answer("Виберіть ваше ім'я зі списку:", reply_markup=keyboard)
+        await OrderState.waiting_for_name.set()
+    elif message.text.lower() == "ні":
+        await message.answer("Введіть ваше ім'я:")
+        await OrderState.waiting_for_name.set()
+    else:
+        await message.answer("Будь ласка, виберіть: Так або Ні.")
 
-@dp.message_handler(state=Order.waiting_for_hookah_count)
-async def process_hookah_count(message: types.Message, state: FSMContext):
-    try:
-        hookah_count = int(message.text)
-        if hookah_count < 1:
-            raise ValueError
-        data = await state.get_data()
-        table_number = data['table_number']
-        await message.answer(f"Ваш заказ:\nСтол №{table_number}\nКальянов: {hookah_count}\n\nСпасибо! Ожидайте кальяны 🍹")
-        await state.finish()
-    except ValueError:
-        await message.answer("Введите корректное количество кальянов (число больше 0).")
+@dp.message_handler(state=OrderState.waiting_for_name)
+async def get_name(message: types.Message, state: FSMContext):
+    name_surname = message.text.split()
+    if len(name_surname) == 2:
+        await state.update_data(name=name_surname[0], surname=name_surname[1])
+        await ask_table(message)
+    else:
+        await state.update_data(name=message.text)
+        await message.answer("Тепер напишіть ваше прізвище:")
+        await OrderState.waiting_for_surname.set()
+
+@dp.message_handler(state=OrderState.waiting_for_surname)
+async def get_surname(message: types.Message, state: FSMContext):
+    await state.update_data(surname=message.text)
+    await ask_table(message)
+
+async def ask_table(message: types.Message):
+    await message.answer("Виберіть номер столу (від 1 до 45):", reply_markup=types.ReplyKeyboardRemove())
+    await OrderState.waiting_for_table.set()
+
+@dp.message_handler(state=OrderState.waiting_for_table)
+async def get_table(message: types.Message, state: FSMContext):
+    if not message.text.isdigit() or not (1 <= int(message.text) <= 45):
+        await message.answer("Будь ласка, введіть номер столу від 1 до 45.")
+        return
+    await state.update_data(table=int(message.text))
+    await message.answer("Скільки кальянів замовити?")
+    await OrderState.waiting_for_hookahs.set()
+
+@dp.message_handler(state=OrderState.waiting_for_hookahs)
+async def get_hookahs(message: types.Message, state: FSMContext):
+    if not message.text.isdigit() or int(message.text) < 1:
+        await message.answer("Введіть правильну кількість кальянів (мінімум 1).")
+        return
+    await state.update_data(hookahs=int(message.text))
+
+    data = await state.get_data()
+    name = data.get('name', '')
+    surname = data.get('surname', '')
+    table = data['table']
+    hookahs = data['hookahs']
+
+    order_info = {
+        "name": name,
+        "surname": surname,
+        "table": table,
+        "hookahs": hookahs
+    }
+    orders.append(order_info)
+
+    await message.answer(
+        f"✅ Замовлення прийнято!\n\n"
+        f"👤 Ім'я: {name} {surname}\n"
+        f"🪑 Стіл: {table}\n"
+        f"💨 Кальяни: {hookahs} шт."
+    )
+    await state.finish()
+
+# Адмін команда для перегляду замовлень
+@dp.message_handler(commands=['orders'])
+async def show_orders(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас немає доступу до цієї команди.")
+        return
+    if not orders:
+        await message.answer("Поки що немає замовлень.")
+        return
+    result = "📋 *Список замовлень:*\n\n"
+    for idx, order in enumerate(orders, start=1):
+        result += (f"{idx}. 👤 {order['name']} {order['surname']}\n"
+                   f"🪑 Стіл: {order['table']}\n"
+                   f"💨 Кальяни: {order['hookahs']} шт.\n\n")
+    await message.answer(result, parse_mode="Markdown")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
