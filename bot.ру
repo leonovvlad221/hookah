@@ -1,31 +1,24 @@
 import logging
 import os
-
-from aiohttp import web
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from dotenv import load_dotenv
+from aiohttp import web
 
-# Завантаження .env
+# Завантаження .env змінних
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
 
-# Ініціалізація бота і диспетчера
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Список столів
-TABLES = list(range(1, 46))  # 1-45
-
-# Постійні клієнти
+# Список столів і клієнтів
+TABLES = list(range(1, 46))  # Столи 1-45
 VIP_CLIENTS = [
-    "Эдгар Хачатарян", "Эрнест Хачатарян", "Саша Лысенко", "Эмин Бабаев", "Шахин Бабаев",
-    "Тахир", "Артур Арутюнян", "Тарен Егондян", "Игорь Бегучев", "Артур Маркосян",
+    "Едгар Хачатарян", "Ернест Хачатарян", "Саша Лисенко", "Эмин Бабаев", "Шахин Бабаев",
+    "Тахир", "Артур Арутюнян", "Тарен Егoнян", "Игорь Бегучев", "Артур Маркосян",
     "Аргишт", "Игорь Буштаков", "Саша Бондаренко", "Славик Гречуха", "Артем Зинченко",
     "Валик Понамарев", "Жека Абросимов", "Артем Булгурский", "Виталик Герасимов",
     "Сергей Кесян", "Георгий Кондрашев", "Максим Отрахов", "Сергей Бондаренко",
@@ -33,48 +26,73 @@ VIP_CLIENTS = [
     "Габилова Алина", "Андрей Бей"
 ]
 
-# FSM стани
+# FSM (Finite State Machine)
 class Booking(StatesGroup):
     waiting_for_table = State()
     waiting_for_hookahs = State()
 
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message, state: FSMContext):
-    await message.answer("Привет! Напиши номер стола (1-45):")
+# /start команда
+@dp.message(commands=["start"])
+async def start(message: types.Message, state: FSMContext):
+    await message.answer("Привіт! Оберіть номер столу (1-45):")
     await state.set_state(Booking.waiting_for_table)
 
+# Обробка номера столу
 @dp.message(Booking.waiting_for_table)
-async def process_table(message: Message, state: FSMContext):
-    if not message.text.isdigit() or int(message.text) not in TABLES:
-        await message.answer("Неверный номер стола. Введите число от 1 до 45.")
-        return
-    await state.update_data(table=int(message.text))
-    await message.answer("Сколько кальянов вам нужно?")
-    await state.set_state(Booking.waiting_for_hookahs)
+async def get_table(message: types.Message, state: FSMContext):
+    try:
+        table_number = int(message.text)
+        if table_number not in TABLES:
+            await message.answer("Будь ласка, оберіть стіл від 1 до 45.")
+            return
+        await state.update_data(table=table_number)
+        await message.answer("Скільки кальянів бажаєте замовити?")
+        await state.set_state(Booking.waiting_for_hookahs)
+    except ValueError:
+        await message.answer("Введіть, будь ласка, номер столу цифрами.")
 
+# Обробка кількості кальянів
 @dp.message(Booking.waiting_for_hookahs)
-async def process_hookahs(message: Message, state: FSMContext):
-    if not message.text.isdigit() or int(message.text) <= 0:
-        await message.answer("Введите корректное количество кальянов.")
-        return
-    data = await state.get_data()
-    table = data["table"]
-    hookahs = int(message.text)
-    await message.answer(f"Ваш заказ: Стол #{table}, {hookahs} кальян(ов). Спасибо!")
-    await state.clear()
+async def get_hookahs(message: types.Message, state: FSMContext):
+    try:
+        hookah_count = int(message.text)
+        if hookah_count <= 0:
+            await message.answer("Кількість кальянів має бути більше нуля.")
+            return
+        data = await state.get_data()
+        table_number = data["table"]
+        name = message.from_user.first_name
 
-# Створення aiohttp додатку
+        # Перевірка VIP
+        if name in VIP_CLIENTS:
+            greeting = f"Шановний VIP {name},"
+        else:
+            greeting = f"{name},"
+
+        await message.answer(
+            f"{greeting}\nВаше замовлення:\n"
+            f"Стіл №{table_number}\n"
+            f"Кількість кальянів: {hookah_count}\n\n"
+            f"Дякуємо за замовлення!"
+        )
+        await state.clear()
+    except ValueError:
+        await message.answer("Введіть, будь ласка, кількість кальянів цифрами.")
+
+# Webhook handler
+async def handle_webhook(request):
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logging.exception("Error handling webhook")
+    return web.Response()
+
+# Aiohttp сервер
 app = web.Application()
+app.router.add_post("/", handle_webhook)
 
-# Підключаємо webhook handler
-SimpleRequestHandler(
-    dispatcher=dp,
-    bot=bot,
-).register(app, path="/")
-
-# Підключаємо диспетчер
-setup_application(app, dp)
-
-# Запуск сервера
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     web.run_app(app, port=PORT)
