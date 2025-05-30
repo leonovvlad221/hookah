@@ -32,7 +32,7 @@ class Booking(StatesGroup):
     waiting_for_hookahs = State()
 
 # /start команда
-@dp.message(commands=["start"])
+@dp.message(F.text == "/start")
 async def start(message: types.Message, state: FSMContext):
     await message.answer("Привіт! Оберіть номер столу (1-45):")
     await state.set_state(Booking.waiting_for_table)
