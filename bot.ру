@@ -1,22 +1,27 @@
 import logging
 import os
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram import web
+from aiogram import Bot, Dispatcher, types
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 from dotenv import load_dotenv
+from aiogram.utils.executor import start_webhook
 
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Мы позже добавим его в .env
-PORT = int(os.getenv("PORT", 8000))
+
+TOKEN = os.getenv('TOKEN')
+WEBHOOK_HOST = os.getenv('WEBHOOK_URL')  # https://hookah-h9he.onrender.com
+WEBHOOK_PATH = '/webhook'
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+PORT = int(os.getenv('PORT', 8000))
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
 # Столы
-TABLES = list(range(1, 46))  # 1-45
+TABLES = list(range(1, 46))  # 1–45
 
 # Постоянные клиенты
 VIP_CLIENTS = [
@@ -29,57 +34,55 @@ VIP_CLIENTS = [
     "Габилова Алина", "Андрей Бей"
 ]
 
+# Состояния
 class Booking(StatesGroup):
-    choosing_table = State()
-    choosing_count = State()
+    waiting_for_table = State()
+    waiting_for_hookah = State()
 
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message, state: FSMContext):
-    await message.answer("Привет! Какой номер стола? (1-45)")
-    await state.set_state(Booking.choosing_table)
+@dp.message_handler(commands='start')
+async def cmd_start(message: types.Message):
+    await message.answer("Привет! Какой номер стола?")
+    await Booking.waiting_for_table.set()
 
-@dp.message(Booking.choosing_table)
-async def choose_table(message: Message, state: FSMContext):
+@dp.message_handler(state=Booking.waiting_for_table)
+async def process_table(message: types.Message, state: FSMContext):
     try:
         table_number = int(message.text)
         if table_number not in TABLES:
             raise ValueError
-        await state.update_data(table=table_number)
-        await message.answer(f"Сколько кальянов вы хотите заказать для стола {table_number}?")
-        await state.set_state(Booking.choosing_count)
+        await state.update_data(table_number=table_number)
+        await message.answer(f"Сколько кальянов хотите заказать для стола №{table_number}?")
+        await Booking.waiting_for_hookah.set()
     except ValueError:
-        await message.answer("Пожалуйста, введите номер стола от 1 до 45.")
+        await message.answer("Введите правильный номер стола от 1 до 45.")
 
-@dp.message(Booking.choosing_count)
-async def choose_count(message: Message, state: FSMContext):
+@dp.message_handler(state=Booking.waiting_for_hookah)
+async def process_hookah(message: types.Message, state: FSMContext):
     try:
-        count = int(message.text)
+        hookah_count = int(message.text)
+        if hookah_count <= 0:
+            raise ValueError
         data = await state.get_data()
-        table = data["table"]
-        await message.answer(f"✅ Заказ принят!\nСтол №{table}\nКоличество кальянов: {count}")
-        await state.clear()
+        table_number = data['table_number']
+        await message.answer(f"Ваш заказ принят: {hookah_count} кальян(ов) на стол №{table_number}.\nСпасибо!")
+        await state.finish()
     except ValueError:
-        await message.answer("Пожалуйста, введите число.")
+        await message.answer("Введите корректное количество кальянов.")
 
-# Админ-панель
-ADMINS = [123456789]  # <-- Введи сюда свой Telegram ID
-
-@dp.message(F.text == "/admin")
-async def admin_panel(message: Message):
-    if message.from_user.id in ADMINS:
-        vip_list = "\n".join(VIP_CLIENTS)
-        await message.answer(f"👑 Список постоянных клиентов:\n{vip_list}")
-    else:
-        await message.answer("⛔ Доступ запрещён.")
-
-async def on_startup(dispatcher):
+async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
 
-async def on_shutdown(dispatcher):
+async def on_shutdown(dp):
+    logging.warning('Shutting down..')
     await bot.delete_webhook()
+    logging.warning('Bye!')
 
-app = web.Application()
-dp.setup_web(app)
-
-if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=PORT)
+if __name__ == '__main__':
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        host='0.0.0.0',
+        port=PORT,
+    )
