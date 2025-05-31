@@ -11,7 +11,7 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 PORT = int(os.getenv("PORT", 8000))
 
-bot = Bot(token=7593024843:AAF29_I5HZTMXNuZklD0nE2fQuFEOyCwELc)
+bot = Bot(token="7593024843:AAF29_I5HZTMXNuZklD0nE2fQuFEOyCwELc")
 dp = Dispatcher()
 
 # Список столів і клієнтів
