@@ -90,9 +90,18 @@ async def handle_webhook(request):
     return web.Response()
 
 # Aiohttp сервер
+import os
+
+WEBHOOK_URL = "https://hookah-h9he.onrender.com"
+
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
+
 app = web.Application()
 app.router.add_post("/", handle_webhook)
+app.on_startup.append(on_startup)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    web.run_app(app, port=PORT)
+    port = int(os.environ.get('PORT', 10000))
+    web.run_app(app, port=port)
